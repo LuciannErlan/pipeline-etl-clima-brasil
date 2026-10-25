@@ -14,6 +14,16 @@ Projeto completo de **Engenharia de Dados de ponta a ponta**: extrai dados meteo
 
 ---
 
+## 📸 Vitrine do Projeto
+
+### 📊 Dashboard Analítico Interativo ([Acessar ao vivo no Streamlit Cloud](https://clima-brasil-luciann.streamlit.app/))
+[![Dashboard Streamlit](assets/dashboard_streamlit.png)](https://clima-brasil-luciann.streamlit.app/)
+
+### ⚙️ Orquestração do Pipeline no Apache Airflow (`extract >> transform >> quality_check >> load`)
+![Execuções da DAG no Apache Airflow](assets/airflow_dag.png)
+
+---
+
 ## 🏗️ Arquitetura de Dados
 
 ```mermaid
@@ -96,6 +106,7 @@ docker compose down
 ## 📂 Estrutura de Pastas
 
 ```text
+├── assets/                   # Capturas de tela do Dashboard e do Apache Airflow
 ├── config/
 │   └── .env.example          # Modelo de variáveis de ambiente
 ├── dags/
