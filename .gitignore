@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+*.egg-info/
+
+# Ambiente virtual
+.venv/
+venv/
+env/
+
+# Variáveis de ambiente e credenciais (NUNCA subir para o GitHub!)
+.env
+config/.env
+config/*.env
+
+# Dados locais e temporários
+data/*.json
+data/*.parquet
+data/*.csv
+
+# Airflow e Logs
+logs/
+airflow.db
+airflow.cfg
+config/airflow.cfg
+config/webserver_config.py
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# IDEs e Sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
