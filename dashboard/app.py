@@ -28,6 +28,16 @@ st.set_page_config(
 )
 
 
+def get_api_key() -> str | None:
+    env_key = os.getenv("API_KEY")
+    if env_key:
+        return env_key
+    try:
+        return st.secrets.get("API_KEY")
+    except Exception:
+        return None
+
+
 def get_db_engine():
     user = os.getenv("user", "airflow")
     password = os.getenv("password", "airflow")
@@ -36,12 +46,13 @@ def get_db_engine():
     host = "postgres" if in_docker else os.getenv("host", "localhost")
     port = "5432" if in_docker else os.getenv("port", "5433")
     return create_engine(
-        f"postgresql+psycopg2://{user}:{quote_plus(password)}@{host}:{port}/{database}"
+        f"postgresql+psycopg2://{user}:{quote_plus(password)}@{host}:{port}/{database}",
+        connect_args={"connect_timeout": 2},
     )
 
 
 @st.cache_data(ttl=60)
-def load_dashboard_data() -> pd.DataFrame:
+def try_load_postgres_data() -> tuple[pd.DataFrame, bool]:
     engine = get_db_engine()
     query = """
         SELECT *
@@ -57,20 +68,33 @@ def load_dashboard_data() -> pd.DataFrame:
                     df[col] = pd.to_datetime(df[col], utc=True).dt.tz_convert(
                         "America/Sao_Paulo"
                     )
-        return df
+        return df, True
     except Exception:
+        return pd.DataFrame(), False
+
+
+@st.cache_data(ttl=600)
+def fetch_cloud_live_data(api_key: str) -> pd.DataFrame:
+    records = extract_weather_data(api_key)
+    if not records:
         return pd.DataFrame()
+    df = data_transformations()
+    validate_weather_data(df)
+    return df
 
 
-def run_etl_now() -> tuple[bool, str]:
+def run_etl_now(is_postgres_available: bool) -> tuple[bool, str]:
     try:
-        api_key = os.getenv("API_KEY")
+        api_key = get_api_key()
+        if not api_key:
+            return False, "API_KEY não configurada."
         records = extract_weather_data(api_key)
         if not records:
             return False, "A API não retornou registros."
         df = data_transformations()
         validate_weather_data(df)
-        load_weather_data("weather_data", df)
+        if is_postgres_available:
+            load_weather_data("weather_data", df)
         st.cache_data.clear()
         return True, f"Coleta concluída para {len(df)} capitais!"
     except Exception as exc:
@@ -83,28 +107,43 @@ st.caption(
     "Dashboard analítico alimentado pelo Pipeline ETL (OpenWeatherMap API → Python/Pandas → PostgreSQL → Apache Airflow)"
 )
 
+df_all, is_postgres = try_load_postgres_data()
+
+if not is_postgres:
+    cloud_api_key = get_api_key()
+    if not cloud_api_key:
+        st.error(
+            "Chave `API_KEY` não encontrada! No Streamlit Cloud, adicione `API_KEY = \"sua_chave\"` em **Settings → Secrets**."
+        )
+        st.stop()
+    df_all = fetch_cloud_live_data(cloud_api_key)
+
 # --- Barra Lateral ---
 with st.sidebar:
     st.header("⚙️ Controles do Pipeline")
+    if is_postgres:
+        st.caption("🐘 **Fonte ativa:** PostgreSQL (Pipeline Local)")
+    else:
+        st.caption("☁️ **Fonte ativa:** API em Tempo Real (Streamlit Cloud)")
+
     if st.button("⚡ Coletar Clima Agora (ETL)", width="stretch", type="primary"):
         with st.spinner("Executando Extract → Transform → Quality → Load..."):
-            ok, msg = run_etl_now()
+            ok, msg = run_etl_now(is_postgres)
         if ok:
             st.success(msg)
+            st.rerun()
         else:
             st.error(msg)
 
-    if st.button("🔄 Atualizar Dados do Banco", width="stretch"):
+    if st.button("🔄 Atualizar Dados", width="stretch"):
         st.cache_data.clear()
         st.rerun()
 
     st.divider()
 
-df_all = load_dashboard_data()
-
 if df_all.empty:
     st.warning(
-        "Ainda não há dados na tabela `weather_data`. Clique em **⚡ Coletar Clima Agora (ETL)** na barra lateral para buscar os dados!"
+        "Ainda não há dados carregados. Clique em **⚡ Coletar Clima Agora (ETL)** na barra lateral para buscar os dados!"
     )
     st.stop()
 
@@ -171,7 +210,7 @@ col4.metric(
     f"{rainiest['city_name']} ({rainiest['state']})",
 )
 col5.metric(
-    "🗄️ Registros no Banco",
+    "🗄️ Registros Carregados",
     f"{len(df_all)}",
     f"Última: {df_latest['datetime'].max().strftime('%H:%M')}",
 )
@@ -183,7 +222,7 @@ tab_overview, tab_climate, tab_history = st.tabs(
     [
         "🗺️ Mapa & Comparativo Atual",
         "📊 Regiões & Correlações",
-        "📈 Histórico & Tabela SQL",
+        "📈 Histórico & Tabela de Dados",
     ]
 )
 
@@ -305,7 +344,7 @@ with tab_climate:
         st.plotly_chart(fig_reg, width="stretch")
 
 with tab_history:
-    st.subheader("Evolução Histórica das Coletas (Série Temporal)")
+    st.subheader("Evolução das Coletas (Série Temporal)")
     fig_line = px.line(
         df_filtered.sort_values("datetime"),
         x="datetime",
@@ -321,7 +360,7 @@ with tab_history:
     )
     st.plotly_chart(fig_line, width="stretch")
 
-    st.subheader("Registros Armazenados no PostgreSQL (`weather_data`)")
+    st.subheader("Registros Meteorológicos Estruturados")
     display_cols = [
         "datetime",
         "city_name",
@@ -344,4 +383,3 @@ with tab_history:
         file_name="weather_data_brasil.csv",
         mime="text/csv",
     )
-
